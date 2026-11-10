@@ -6,7 +6,27 @@ import LeaveRequest from "./src/models/LeaveRequest.js";
 
 dotenv.config();
 const app = express();
-app.use(cors({ origin: process.env.CLIENT_URL?.split(",") || true }));
+
+const allowedOrigins = [
+  "https://kanmani-12.github.io",
+  "http://localhost:5173",
+  ...(process.env.CLIENT_URL?.split(",").map((url) =>
+    url.trim().replace(/\/$/, ""),
+  ) || []),
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow tools like curl/Postman (no origin) and whitelisted sites
+      if (!origin || allowedOrigins.includes(origin))
+        return callback(null, true);
+      return callback(new Error(`CORS blocked: ${origin}`));
+    },
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  }),
+);
 app.use(express.json());
 
 app.get("/api/health", (req, res) =>
@@ -31,11 +51,9 @@ app.post("/api/leaves", async (req, res) => {
       Number(days) < 1 ||
       !reason?.trim()
     ) {
-      return res
-        .status(400)
-        .json({
-          message: "Enter a valid leave type, number of days and reason.",
-        });
+      return res.status(400).json({
+        message: "Enter a valid leave type, number of days and reason.",
+      });
     }
     const leave = await LeaveRequest.create({
       leaveType,
