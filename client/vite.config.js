@@ -4,9 +4,10 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  base: "/leave-ease/",
   server: {
     proxy: {
-      "/api": "http://localhost:5001",
+      "/api": "https://leave-ease-27ij.onrender.com",
     },
   },
 });
