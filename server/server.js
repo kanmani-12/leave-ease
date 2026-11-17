@@ -44,20 +44,46 @@ app.get("/api/leaves", async (req, res) => {
 
 app.post("/api/leaves", async (req, res) => {
   try {
-    const { leaveType, days, reason, employeeName } = req.body;
+    const { leaveType, fromDate, toDate, reason, employeeName } = req.body;
+
+    // 1. Validate leave type and reason
     if (
       !["Casual Leave", "Medical Leave"].includes(leaveType) ||
-      !Number.isInteger(Number(days)) ||
-      Number(days) < 1 ||
       !reason?.trim()
     ) {
       return res.status(400).json({
-        message: "Enter a valid leave type, number of days and reason.",
+        message: "Enter a valid leave type and reason.",
       });
     }
+
+    // 2. Validate the dates
+    if (!fromDate || !toDate) {
+      return res
+        .status(400)
+        .json({ message: "From and To dates are required." });
+    }
+
+    const start = new Date(fromDate);
+    const end = new Date(toDate);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return res.status(400).json({ message: "Enter valid From and To dates." });
+    }
+
+    if (end < start) {
+      return res
+        .status(400)
+        .json({ message: "To date cannot be earlier than From date." });
+    }
+
+    // 3. Calculate days on the server (inclusive of both dates)
+    const days = Math.floor((end - start) / (1000 * 60 * 60 * 24)) + 1;
+
     const leave = await LeaveRequest.create({
       leaveType,
-      days: Number(days),
+      fromDate: start,
+      toDate: end,
+      days,
       reason: reason.trim(),
       employeeName: employeeName?.trim() || "Employee",
       status: "Pending Approval",
