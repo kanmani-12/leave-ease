@@ -28,16 +28,33 @@ function initials(name = "") {
   return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
 }
 
+// Today's date as YYYY-MM-DD in the user's local timezone
+function todayString() {
+  const d = new Date();
+  const offset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - offset).toISOString().split("T")[0];
+}
+
 function App() {
+  const today = todayString();
+
   const [page, setPage] = useState("employee");
   const [leaves, setLeaves] = useState([]);
   const [leaveType, setLeaveType] = useState("Casual Leave");
-  const [days, setDays] = useState("1");
+  const [fromDate, setFromDate] = useState(today);
+  const [toDate, setToDate] = useState(today);
   const [reason, setReason] = useState("");
   const [employeeName, setEmployeeName] = useState("Employee");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("All");
+
+  // Number of days is now calculated from the selected date range (inclusive)
+  const days = useMemo(() => {
+    if (!fromDate || !toDate) return 0;
+    const diff = (new Date(toDate) - new Date(fromDate)) / 86400000;
+    return diff >= 0 ? Math.round(diff) + 1 : 0;
+  }, [fromDate, toDate]);
 
   const loadLeaves = async () => {
     try {
@@ -85,17 +102,39 @@ function App() {
   async function submitLeave(event) {
     event.preventDefault();
     setMessage("");
+
+    if (!fromDate || !toDate) {
+      setMessage("Please select both From and To dates.");
+      return;
+    }
+    if (days < 1) {
+      setMessage("The To date cannot be earlier than the From date.");
+      return;
+    }
+    if (days > balance(leaveType)) {
+      setMessage(`Only ${balance(leaveType)} day(s) available for ${leaveType}.`);
+      return;
+    }
+
     try {
       const response = await fetch(`${API}/api/leaves`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leaveType, days, reason, employeeName }),
+        body: JSON.stringify({
+          leaveType,
+          days,
+          fromDate,
+          toDate,
+          reason,
+          employeeName,
+        }),
       });
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.message || "Unable to submit request.");
       setReason("");
-      setDays("1");
+      setFromDate(today);
+      setToDate(today);
       setMessage("Leave request submitted successfully.");
       await loadLeaves();
     } catch (error) {
@@ -127,6 +166,14 @@ function App() {
       month: "short",
       year: "numeric",
     });
+
+  // Shows "17 Nov 2026 – 18 Nov 2026" when dates exist, otherwise falls back
+  // to the applied date so older records (without dates) still display well.
+  const rangeText = (item) =>
+    item.fromDate && item.toDate
+      ? `${dateText(item.fromDate)} – ${dateText(item.toDate)}`
+      : `Applied ${dateText(item.createdAt)}`;
+
   const statusClass = (status) =>
     status === "Approved"
       ? "approved"
@@ -226,7 +273,7 @@ function App() {
                       <RequestCard
                         key={item._id}
                         item={item}
-                        dateText={dateText}
+                        rangeText={rangeText}
                         statusClass={statusClass}
                       />
                     ))}
@@ -250,35 +297,55 @@ function App() {
                       required
                     />
                   </div>
+
+                  <div className="field">
+                    <label htmlFor="leaveType">Leave type</label>
+                    <select
+                      id="leaveType"
+                      value={leaveType}
+                      onChange={(e) => setLeaveType(e.target.value)}
+                    >
+                      <option>Casual Leave</option>
+                      <option>Medical Leave</option>
+                    </select>
+                  </div>
+
                   <div className="field-row">
                     <div className="field">
-                      <label htmlFor="leaveType">Leave type</label>
-                      <select
-                        id="leaveType"
-                        value={leaveType}
-                        onChange={(e) => setLeaveType(e.target.value)}
-                      >
-                        <option>Casual Leave</option>
-                        <option>Medical Leave</option>
-                      </select>
+                      <label htmlFor="fromDate">From</label>
+                      <input
+                        id="fromDate"
+                        type="date"
+                        min={today}
+                        value={fromDate}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setFromDate(value);
+                          // keep the To date from falling behind the From date
+                          if (!toDate || toDate < value) setToDate(value);
+                        }}
+                        aria-describedby="days-hint"
+                        required
+                      />
                     </div>
                     <div className="field">
-                      <label htmlFor="days">Days</label>
+                      <label htmlFor="toDate">To</label>
                       <input
-                        id="days"
-                        type="number"
-                        min="1"
-                        max={balance(leaveType)}
-                        value={days}
-                        onChange={(e) => setDays(e.target.value)}
+                        id="toDate"
+                        type="date"
+                        min={fromDate || today}
+                        value={toDate}
+                        onChange={(e) => setToDate(e.target.value)}
                         aria-describedby="days-hint"
                         required
                       />
                     </div>
                   </div>
                   <p className="hint" id="days-hint">
-                    {balance(leaveType)} days available for {leaveType}
+                    {days} day(s) selected · {balance(leaveType)} available for{" "}
+                    {leaveType}
                   </p>
+
                   <div className="field">
                     <label htmlFor="reason">Reason</label>
                     <textarea
@@ -293,9 +360,7 @@ function App() {
                   <button
                     className="primary-btn"
                     type="submit"
-                    disabled={
-                      Number(days) < 1 || Number(days) > balance(leaveType)
-                    }
+                    disabled={days < 1 || days > balance(leaveType)}
                   >
                     Submit request
                   </button>
@@ -386,8 +451,7 @@ function App() {
                           <span className="type-tag">{item.leaveType}</span>
                         </div>
                         <p className="request-meta">
-                          {item.days} day(s) · Applied{" "}
-                          {dateText(item.createdAt)}
+                          {item.days} day(s) · {rangeText(item)}
                         </p>
                         <p className="reason">{item.reason}</p>
                       </div>
@@ -482,7 +546,7 @@ function StatCard({ icon, label, value, tone }) {
   );
 }
 
-function RequestCard({ item, dateText, statusClass }) {
+function RequestCard({ item, rangeText, statusClass }) {
   const Icon =
     item.status === "Approved"
       ? CheckCircle2
@@ -505,7 +569,7 @@ function RequestCard({ item, dateText, statusClass }) {
           </span>
         </div>
         <p className="request-meta">
-          {item.days} day(s) · Applied {dateText(item.createdAt)}
+          {item.days} day(s) · {rangeText(item)}
         </p>
         <p className="reason">{item.reason}</p>
       </div>
